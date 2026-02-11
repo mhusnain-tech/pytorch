@@ -147,10 +147,12 @@ class _TransformInfo:
     logical_shape: list[int]
 
     def __post_init__(self):
-        assert self.mesh_dim >= 0
-        assert self.src_dst_placements[0] != self.src_dst_placements[1], (
-            "TransformInfo should only be created if it is an op with some effect, not a no-op"
-        )
+        if self.mesh_dim < 0:
+            raise AssertionError
+        if self.src_dst_placements[0] == self.src_dst_placements[1]:
+            raise AssertionError(
+                "TransformInfo should only be created if it is an op with some effect, not a no-op"
+            )
 
     def _comm_type_key(self) -> str | None:
         """
@@ -194,9 +196,10 @@ class _FlattenedTransformInfo(_TransformInfo):
     def __post_init__(self) -> None:
         _TransformInfo.__post_init__(self)
         if self.avg_scale is not None:
-            assert self.avg_scale > 1, (
-                f"avg_scale must be > 1 if set, got {self.avg_scale}"
-            )
+            if not self.avg_scale > 1:
+                raise AssertionError(
+                    f"avg_scale must be > 1 if set, got {self.avg_scale}"
+                )
 
 
 def _get_flattened_mesh_by_layout(
@@ -394,10 +397,13 @@ def _optimize_transform_infos(
         # (e.g., can't merge Partial->Shard(0) with Partial->Shard(1))
         first_placements = infos[0].src_dst_placements
         comm_type = infos[0]._comm_type_key()
-        assert all(
+        if not all(
             are_placements_mergeable(info.src_dst_placements, first_placements)
             for info in infos
-        )
+        ):
+            raise AssertionError(
+                "All transforms must have mergeable src_dst_placements"
+            )
         mesh_dims = tuple(info.mesh_dim for info in infos)
         sorted_mesh_dims = tuple(sorted(mesh_dims))
 
@@ -683,7 +689,8 @@ class DTensorRedistributePlanner:
         Returns:
             A string showing the sequence of DistState transitions, separated by '->'.
         """
-        assert len(src_placement) == mesh.ndim
+        if len(src_placement) != mesh.ndim:
+            raise AssertionError
         if src_shard_order is None:
             src_shard_order = DTensorSpec.compute_default_shard_order(src_placement)
         cur_placement = list(src_placement)
@@ -715,9 +722,13 @@ class DTensorRedistributePlanner:
                 src_dim_placement, _StridedShard
             ):
                 src_dim = src_dim_placement.dim  # type: ignore[attr-defined]
-                assert (
+                if not (
                     src_dim in shard_order_dict and len(shard_order_dict[src_dim]) > 0
-                )
+                ):
+                    raise AssertionError(
+                        f"{src_dim} should be in {shard_order_dict} and "
+                        "shard_order_dict[src_dim] shouldn't be empty"
+                    )
                 # Remove mesh dims in reverse order and verify they match expected dims
                 # (shard_order_dict stores in innermost-to-outermost order)
                 removed_dims = []
@@ -726,10 +737,11 @@ class DTensorRedistributePlanner:
                     removed_dims.append(removed_dim)
                 # Verify the removed dims match what we expect (in reverse order)
                 removed_dims.reverse()
-                assert tuple(removed_dims) == mesh_dims_to_update, (
-                    f"Flattened transform mesh dims mismatch: "
-                    f"expected {mesh_dims_to_update}, but shard_order had {tuple(removed_dims)}"
-                )
+                if tuple(removed_dims) != mesh_dims_to_update:
+                    raise AssertionError(
+                        f"Flattened transform mesh dims mismatch: "
+                        f"expected {mesh_dims_to_update}, but shard_order had {tuple(removed_dims)}"
+                    )
 
             # Check for both Shard and _StridedShard for destination
             if dst_dim_placement.is_shard() or isinstance(
@@ -740,10 +752,11 @@ class DTensorRedistributePlanner:
                     shard_order_dict[dst_dim] = []
                 # Add mesh dims in order and verify they don't already exist
                 for mesh_dim in mesh_dims_to_update:
-                    assert mesh_dim not in shard_order_dict[dst_dim], (
-                        f"Mesh dim {mesh_dim} already in shard_order for tensor dim {dst_dim}: "
-                        f"existing={shard_order_dict[dst_dim]}, adding={mesh_dims_to_update}"
-                    )
+                    if mesh_dim in shard_order_dict[dst_dim]:
+                        raise AssertionError(
+                            f"Mesh dim {mesh_dim} already in shard_order for tensor dim {dst_dim}: "
+                            f"existing={shard_order_dict[dst_dim]}, adding={mesh_dims_to_update}"
+                        )
                     shard_order_dict[dst_dim].append(mesh_dim)
 
             # Update placements for all affected mesh dims
@@ -778,8 +791,10 @@ class DTensorRedistributePlanner:
             dtensor_meta: TensorMeta of the DTensor to redistribute
         """
         self.device_mesh = device_mesh
-        assert device_mesh._is_current_rank_part_of_mesh()
-        assert dtensor_meta is not None
+        if not device_mesh._is_current_rank_part_of_mesh():
+            raise AssertionError
+        if dtensor_meta is None:
+            raise AssertionError
         self.dtensor_meta = dtensor_meta
         self.tensor_dimension = len(dtensor_meta.shape)
         self.strided_shard_placements_in_target: set[_StridedShard] = set()
@@ -1154,7 +1169,8 @@ class DTensorRedistributePlanner:
         for entry in src_state.tensor_dim_to_mesh_dim:
             tensor_dim = entry.tensor_dim
             mesh_dims = entry.mesh_dims
-            assert len(mesh_dims) > 0
+            if len(mesh_dims) <= 0:
+                raise AssertionError
             for mdim in mesh_dims:
                 if mdim == mesh_dim:
                     continue
@@ -1417,7 +1433,8 @@ def _gen_transform_infos_non_cached(
         use_graph_based_transform = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
     elif use_graph_based_transform is None:
         use_graph_based_transform = False
-    assert src_spec.tensor_meta is not None
+    if src_spec.tensor_meta is None:
+        raise AssertionError
     drp = get_redistribute_planner(
         device_mesh,
         src_spec.tensor_meta,
