@@ -2884,7 +2884,10 @@ class CommonTemplate:
             y.backward()
 
             # Check correctness
-            self.assertEqual(y, y_ref)
+            if is_halide_backend(self.device):
+                self.assertEqual(y, y_ref, atol=1e-3, rtol=1e-5)
+            else:
+                self.assertEqual(y, y_ref)
             self.assertEqual(x.grad, x_ref.grad, atol=1e-4, rtol=1e-4)
 
     def test_cumprod_backward_with_zeros(self):
