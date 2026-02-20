@@ -622,6 +622,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Improper error_on_graph_break() call. Please fix your call to error_on_graph_break(). "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
+        elif self.fn is torch._dynamo.bytecode_debugger.breakpoint:
+            tx.output._emit_debugger_breakpoint = True
+            return ConstantVariable.create(None)
         # Handle a `nonstrict_trace(fn)` call
         elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
