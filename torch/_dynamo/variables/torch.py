@@ -1240,7 +1240,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 get_rank,
                 get_world_size,
             )
-            from torch.distributed.tensor import DTensor
 
             @register(
                 _get_group_size_by_name,
@@ -1302,6 +1301,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # guard propagation via options is the best we can do.
                 return VariableTracker.build(tx, invocation_result)
 
+<<<<<<< HEAD
             @register(DTensor.from_local)
             def handle_from_local(
                 self,
@@ -1362,6 +1362,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     ),
                 )
 
+=======
+>>>>>>> 9bd272e16fb (Make DeviceMesh opaque)
         @register(torch.nested.nested_tensor)
         def handle_nested_tensor(
             self,

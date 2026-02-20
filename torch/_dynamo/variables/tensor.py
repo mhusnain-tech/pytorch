@@ -1573,6 +1573,7 @@ class TensorVariable(VariableTracker):
         )
         return result.call_method(tx, "item", [], {})
 
+<<<<<<< HEAD
     def method_redistribute(
         self,
         tx: "InstructionTranslator",
@@ -1647,6 +1648,8 @@ class TensorVariable(VariableTracker):
             ),
         )
 
+=======
+>>>>>>> 9bd272e16fb (Make DeviceMesh opaque)
     def method_register_hook(
         self,
         tx: "InstructionTranslator",
