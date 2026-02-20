@@ -427,25 +427,24 @@ def _default_input_gen_fn(fake_tensor: torch.Tensor) -> torch.Tensor:
 
 
 def _create_fallback_choice(
-    name: str,
     op_overload: torch._ops.OpOverload,
-    kwargs: dict[str, Any],
 ) -> ExternKernelChoice:
-    """Create fallback choice that calls the op eagerly.
+    """Create or reuse fallback choice that calls the op eagerly.
 
-    Re-registration of the same name is allowed and will overwrite the previous
-    kernel. This is safe because the same name should always have equivalent behavior.
-
-    TODO: Automatically detect and handle out variants (has_out_variant=True)
-    for ops that support them.
+    Since kwargs are passed at bind time via maybe_append_choice rather than
+    baked into the kernel, the same ExternKernelChoice is reused across
+    compilations for the same op_overload.
     """
-    fallback_name = f"{name}_fallback"
+    fallback_name = (
+        f"{op_overload.name().replace('::', '_').replace('.', '_')}_fallback"
+    )
 
-    def fallback_wrapper(*args: Any) -> Any:
-        return op_overload(*args, **kwargs)
+    existing = ExternKernelChoice.lookup(fallback_name)
+    if existing is not None:
+        return existing
 
     return ExternKernelChoice(
-        kernel=fallback_wrapper,
+        kernel=op_overload,
         name=fallback_name,
         has_out_variant=False,
         op_overload=op_overload,
@@ -544,7 +543,7 @@ def autotune_custom_op(
     output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
     output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
 
-    fallback_choice = _create_fallback_choice(name, op_overload, fallback_kwargs)
+    fallback_choice = _create_fallback_choice(op_overload)
     fallback_choice.maybe_append_choice(
         choices=choices,
         input_nodes=list(inputs),
@@ -554,6 +553,7 @@ def autotune_custom_op(
             size=output_size,
             stride=output_stride,
         ),
+        **fallback_kwargs,
     )
 
     if not choices:
@@ -574,12 +574,25 @@ def autotune_custom_op(
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
-    # Test mode: force decomposition to win (pick first choice with a graph)
-    if config.test_configs.force_custom_op_decomposition and winning_choice.gm is None:
+    # Test mode: force specific choice to win
+    force_choice = config.test_configs.force_custom_op_decomposition
+    if force_choice is True and winning_choice.gm is None:
+        # Force decomposition: pick first choice with a graph
         for choice in choices:
             if choice.gm is not None:
                 log.info(
                     "Test mode: forcing decomposition %s over fallback",
+                    getattr(choice, "name", type(choice).__name__),
+                )
+                winning_choice = choice
+                selected_result = choice.output_node()
+                break
+    elif force_choice is False and winning_choice.gm is not None:
+        # Force fallback: pick first choice without a graph
+        for choice in choices:
+            if choice.gm is None:
+                log.info(
+                    "Test mode: forcing fallback %s over decomposition",
                     getattr(choice, "name", type(choice).__name__),
                 )
                 winning_choice = choice
