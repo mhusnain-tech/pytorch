@@ -1480,6 +1480,111 @@ class LoweringTest(MultiProcContinuousTest):
         with self.assertRaises(RuntimeError):
             run_and_get_triton_code(compiled_input_direct, x_input)
 
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_symm_mem_placeholder_auto_copy(self):
+        """
+        Verify that when a symm_mem collective's input is a graph placeholder
+        (Inductor does not control its allocation), a pointwise identity copy
+        to P2P memory is automatically inserted.
+        """
+        self._init_process()
+
+        N = 8
+
+        def func(x):
+            return torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+
+        x = torch.rand(N, N, device=self.device)
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, x)
+
+        # The codegen should contain a P2P allocation (for the auto-copy)
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "Expected empty_strided_p2p for auto-inserted copy from placeholder to P2P",
+        )
+        # The codegen should have a triton copy kernel (pointwise identity)
+        self.assertIn(
+            "one_shot_all_reduce_out",
+            code,
+            "Expected out-variant allreduce in generated code",
+        )
+
+        # Verify correctness
+        compiled_result = compiled(x)
+        eager_result = x.clone()
+        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            compiled_result,
+            eager_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled (auto-copy to P2P) and eager all_reduce do not match",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_symm_mem_upstream_propagation(self):
+        """
+        Verify that when a pointwise op (add) sits between a data source and
+        a symm_mem collective, the upstream buffer is propagated to P2P via
+        CommBufferLayout and the pointwise op writes in-place via MutationLayout.
+
+        This tests the fix for the "disconnected P2P buffer" bug where the
+        triton kernel would read from an uninitialized P2P buffer.
+
+        CUDAGraph replay correctness is tested separately in
+        test_symm_mem_upstream_propagation_cudagraph (PR #175450).
+        """
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w = torch.rand(N, N, device=self.device)
+
+        # Pattern: mm → cpu → cuda → add → allreduce
+        # The cpu→cuda roundtrip creates a fallback region (partition boundary).
+        # The add op's output needs P2P, but its input comes from the fallback.
+        def func(x, w):
+            y = torch.mm(x, w)
+            y_cpu = y.cpu()
+            y_back = y_cpu.cuda()
+            z = y_back + 1
+            return torch.ops.symm_mem.one_shot_all_reduce(z, "sum", "0")
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, x, w)
+
+        # Verify upstream propagation generated correct P2P allocation
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "Expected P2P allocation in generated code",
+        )
+        self.assertIn(
+            "one_shot_all_reduce_out",
+            code,
+            "Expected out-variant allreduce in generated code",
+        )
+
+        # Single-run correctness (no CUDAGraph replay)
+        result = compiled(x, w)
+        eager_y = torch.mm(x, w)
+        eager_z = eager_y.cpu().cuda() + 1
+        eager_result = eager_z.clone()
+        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            result,
+            eager_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled (upstream propagation) and eager do not match",
+        )
+
 
 class SymmMemSingleProcTest(TestCase):
     @requires_cuda
