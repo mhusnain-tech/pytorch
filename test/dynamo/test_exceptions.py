@@ -462,7 +462,12 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4)
         self.assertEqual(mod(x), opt_mod(x))
 
-    def test_attribute_error_from_getattr(self):
+    def test_attribute_error_caught_from_user_getattr(self):
+        """
+        This test specifically covers AttributeError propagation when 
+        overriding the default __getattr__ implementation to ensure 
+        compatibility with hasattr() under torch.compile.
+        """
         class Mock:
             def __init__(self):
                 self.a = 5
