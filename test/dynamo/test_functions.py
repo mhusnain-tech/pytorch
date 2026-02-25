@@ -162,6 +162,21 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         return
 
     @make_test
+    def test_getattr_catch_attribute_error(x):
+        class MySubclass:
+            def __getattr__(self, name):
+                raise AttributeError(f"Missing {name}")
+
+        def fn(obj):
+            try:
+                return obj.non_existent_field
+            except AttributeError:
+                return 42
+
+        obj = MySubclass()
+        return fn(obj)
+    
+    @make_test
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
         return inline_script_if_tracing_fn_with_default_args(a, b)
 
