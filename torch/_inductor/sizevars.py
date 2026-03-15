@@ -420,8 +420,16 @@ class SizeVarAllocator:
             return True
 
         # Check if the denominator divides the symbolic expression using GCD.
-        # This handles products (sympy.Mul), sums (sympy.Add), and other composite forms.
-        return sympy.gcd(numerator, denominator) == denominator
+        # This handles cases like symbolic products and sums more robustly.
+        if denominator == 0:
+            return False
+        gcd_result = sympy.gcd(numerator, denominator)
+        
+        # If the GCD is equal to the denominator, it confirms divisibility.
+        if gcd_result == denominator:
+            return True
+            
+        return False
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
         """
