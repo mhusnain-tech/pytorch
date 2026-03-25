@@ -409,66 +409,38 @@ class SizeVarAllocator:
         if denominator == 0:
             return False
 
-        # Constraint check for expression complexity to maintain performance
-        if len(free_symbols(numerator)) > 20:
-            return False
-
-        # 1. Fast Path: Standard symbolic modulo verification
-        expr = sympy.Eq(sympy.Mod(numerator, denominator), 0)
-        if self.statically_known_true(expr):  # type: ignore[arg-type]
+        if numerator == denominator:
             return True
 
+        # Use the new structural helper if denominator is an integer
+        # This aligns your PR with the changes in #177214
+        if isinstance(denominator, (int, sympy.Integer)):
+            if self._is_multiple_of(numerator, int(denominator)):
+                return True
+
+        # Performance guard for complex symbolic logic
+        if len(free_symbols(numerator)) > 15:
+            return False
+
         try:
-            # 2. Algebraic Cancellation: Verifies divisibility by attempting to 
-            # reduce the quotient to an integer form without remainders.
+            # Step 1: Algebraic Cancellation with Strict Check
+            # Essential for fixing vision model regressions (e.g., MaskRCNN)
             div = sympy.cancel(numerator / denominator)
-            if not div.has(sympy.Mod) and div.is_integer is not False:
+            if not div.has(sympy.Mod) and div.is_integer == True:
                 return True
         except Exception:
             pass
 
         try:
-            # 3. Structural Decomposition: Necessary for handling symbolic products (Mul) 
-            # where metadata might inhibit automatic simplification.
-            if isinstance(numerator, sympy.Mul):
-                for arg in numerator.args:
-                    if sympy.cancel(arg / denominator) == 1:
-                        return True
-        except Exception:
-            pass
-
-        try:
-            # 4. Symbolic GCD Fallback: Ensures robust coverage for edge cases 
-            # in divisibility propagation.
-            if sympy.gcd(numerator, denominator) == denominator:
+            # Step 2: GCD Fallback for additive cases (e.g., 2a + 2b is multiple of 2)
+            common = sympy.gcd(numerator, denominator)
+            if common == denominator:
                 return True
         except Exception:
             pass
 
         return False
-
-    def statically_known_power_of_2(self, expr: Expr) -> bool:
-        """
-        Returns a bool indicating if x is known to be a power of 2.
-        """
-        return isinstance(expr, sympy.Integer) and is_power_of_2(int(expr))
-
-    # The expect/check functions require you to ALREADY KNOW that a particular
-    # condition holds. They are similar to expect_true in symbolic_shapes.py and
-    # torch.check but operates on sympy expressions instead of symnodes.
-    def expect_true(self, expr: Expr) -> bool:
-        """
-        Use it when you already know that expr is true or should be true and want to
-        ensure that guards/runtime assertions are in place to ensure this in compiled
-        function. Unlike check, this WON'T raise an error if expr isn't actually true.
-        check Note [expect_true].
-        """
-        if not self.statically_known_true(expr):
-            return self.shape_env.guard_or_defer_runtime_assert(
-                expr, "sizevars.expect_true"
-            )
-        return True
-
+    
     def check(self, expr: Expr) -> None:
         """
         Use it when you already know that expr is true or should be true and want to
