@@ -50,6 +50,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch._inductor.virtualized import V
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
@@ -303,11 +304,17 @@ def cudagraph_partition_post_compile(
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         # Log reasons and raise error if cudagraph_or_error=True
         if cudagraph_fail_reasons:
-            log_cudagraph_skip_and_bump_counter(f"skipping cudagraphs due to {cudagraph_fail_reasons=}")
+            log_cudagraph_skip_and_bump_counter(
+                f"skipping cudagraphs due to {cudagraph_fail_reasons=}"
+            )
         elif compiled_graph.partition_maps is None:
-            log_cudagraph_skip_and_bump_counter("skipping cudagraphs as compiled_graph.partition_maps is None")
+            log_cudagraph_skip_and_bump_counter(
+                "skipping cudagraphs as compiled_graph.partition_maps is None"
+            )
         else:
-            log_cudagraph_skip_and_bump_counter("skipping cudagraphs as len(compiled_graph.partition_maps) == 0")
+            log_cudagraph_skip_and_bump_counter(
+                "skipping cudagraphs as len(compiled_graph.partition_maps) == 0"
+            )
         if V.config.inductor.cudagraph_or_error:
             raise RuntimeError("Unable to find any CUDA graphable partitions")
         return
