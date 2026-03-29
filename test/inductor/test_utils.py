@@ -251,20 +251,18 @@ class TestUtils(TestCase):
         """
 
         # Initialize allocator with a dummy shape environment symbol
-        allocator = SizeVarAllocator(Symbol("dummy_env"))
+        allocator = SizeVarAllocator()
 
         # Define symbols representing dimensions
         s0 = Symbol("s0", integer=True)
         s1 = Symbol("s1", integer=True)
         denominator = 16
 
-        # Mock statically_known_true to simulate: torch._check(s1 % 16 == 0)
-        def mock_known_true(expr):
-            return isinstance(expr, sympy.Equality) and \
-                   expr.lhs == sympy.Mod(s1, denominator) and \
-                   expr.rhs == 0
+        # Add a symbolic constraint to the ShapeEnv indicating that s1 is congruent to 0 modulo `denominator`.
+        allocator.shape_env.add_constraint(
+            sympy.Eq(sympy.Mod(s1, denominator), 0)
+        )
 
-        allocator.statically_known_true = mock_known_true
 
         # Test Case 1: Simple product (s0 * s1) -> should be divisible by 16
         product_expr = s0 * s1
