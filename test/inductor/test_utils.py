@@ -15,8 +15,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils._sympy.functions import Identity
-from torch.utils._sympy.functions import Mod
+from torch.utils._sympy.functions import Identity, Mod
 
 class TestUtils(TestCase):
     def test_zip_schema(self):
@@ -250,11 +249,11 @@ class TestUtils(TestCase):
         """
 
         # Initialize allocator with a dummy shape environment symbol
-        allocator = SizeVarAllocator()
+        allocator = V.graph.sizevars
 
         # Define symbols representing dimensions
-        s0 = Symbol("s0", integer=True)
-        s1 = Symbol("s1", integer=True)
+        s0 = allocator.new_symintvar("s0")
+        s1 = allocator.new_symintvar("s1")
         denominator = 16
 
         allocator.shape_env._add_divisible(Mod(s1, 16))
